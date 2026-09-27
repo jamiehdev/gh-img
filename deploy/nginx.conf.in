@@ -1,0 +1,57 @@
+# public read side of gh-img. nginx serves the files straight from disk, so
+# no application code is reachable from the internet.
+
+server {
+    listen 80;
+    server_name @PUBLIC_HOST@;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name @PUBLIC_HOST@;
+    ssl_certificate @SSL_CERT@;
+    ssl_certificate_key @SSL_KEY@;
+
+    root /srv/gh-img;
+    autoindex off;
+    server_tokens off;
+    client_max_body_size 1k;
+    # image paths work as secrets, so they are not written to the access log
+    access_log off;
+
+    add_header X-Robots-Tag "noindex, nofollow, noarchive, noimageindex" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+    add_header Cross-Origin-Resource-Policy "cross-origin" always;
+
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    # names are 128 random bits, so a URL cannot be guessed and there is no listing
+    location ~ "^/[A-Za-z0-9_-]{22}\.(png|jpg|gif|webp)$" {
+        limit_except GET { deny all; }
+        types {
+            image/png png;
+            image/jpeg jpg;
+            image/gif gif;
+            image/webp webp;
+        }
+        default_type application/octet-stream;
+        # one day, so a deleted image drops out of Cloudflare and GitHub's camo proxy
+        add_header Cache-Control "public, max-age=86400" always;
+        add_header X-Robots-Tag "noindex, nofollow, noarchive, noimageindex" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "default-src 'none'; sandbox" always;
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 404;
+    }
+}

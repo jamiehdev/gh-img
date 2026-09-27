@@ -1,0 +1,60 @@
+[Unit]
+Description=gh-img upload service (tailnet only)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gh-img
+Group=gh-img
+Environment=IMG_DIR=/srv/gh-img
+Environment=INDEX_PATH=/var/lib/gh-img/index.json
+Environment=BIND_HOST=@BIND_HOST@
+Environment=PORT=@PORT@
+Environment=PUBLIC_BASE=https://@PUBLIC_HOST@
+LoadCredential=token:/etc/gh-img/token
+ExecStart=/usr/local/bin/gh-img-server
+Restart=always
+RestartSec=5
+# files are 0640 in a setgid www-data directory, so nginx reads them and other services do not
+UMask=0027
+StateDirectory=gh-img
+StateDirectoryMode=0700
+ReadWritePaths=/srv/gh-img
+
+# only the listed tailnet clients reach the port; this also blocks local
+# processes, which would connect from the server's own tailnet address
+IPAddressAllow=@ALLOWED_CLIENTS@
+IPAddressDeny=any
+RestrictAddressFamilies=AF_INET AF_INET6
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+MemoryMax=256M
+TasksMax=16
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# upload images for GitHub issues and PRs and print Markdown to paste.
+#
+#   gh-img [--alt TEXT] [--ttl 30d | --keep] FILE...   upload, print ![alt](url)
+#   gh-img --url FILE...                               upload, print bare URLs
+#   gh-img rm URL...                                   delete, and purge Cloudflare's cache
+#
+# images expire after 90 days unless --keep or --ttl says otherwise. Anyone
+# holding a URL can open the image, even when the repo is private: check a
+# screenshot for secrets, tokens and client data before uploading it.
+#
+# settings come from ~/.config/gh-img/config (shell syntax):
+#   GH_IMG_ENDPOINT=http://<tailscale address>:8787   required
+#   GH_IMG_CF_ZONE=<zone id>                          optional, enables purge on rm
+# the upload token is ~/.config/gh-img/token and the Cloudflare token is
+# ~/.config/gh-img/cloudflare-token, both mode 0600.
+set -euo pipefail
+
+conf_dir="${GH_IMG_CONFIG_DIR:-$HOME/.config/gh-img}"
+token_file="$conf_dir/token"
+cf_token_file="$conf_dir/cloudflare-token"
+
+die() { echo "gh-img: $*" >&2; exit 1; }
+
+# shellcheck source=/dev/null
+[ -r "$conf_dir/config" ] && . "$conf_dir/config"
+endpoint="${GH_IMG_ENDPOINT:-}"
+[ -n "$endpoint" ] || die "set GH_IMG_ENDPOINT in $conf_dir/config"
+
+private_file() {
+  [ -r "$1" ] || die "missing $1"
+  local mode
+  mode=$(stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1")
+  [ "$mode" = 600 ] || [ "$mode" = 400 ] || die "$1 must be mode 600, is $mode"
+}
+
+# the token reaches curl through a file descriptor, never argv, so other
+# processes cannot read it from the process list
+request() {
+  local out status
+  out=$(curl -sS --max-time 90 -w '\n%{http_code}' \
+    -H @<(printf 'Authorization: Bearer %s\n' "$(<"$token_file")") "$@") ||
+    die "cannot reach $endpoint (is Tailscale up?)"
+  status=${out##*$'\n'}
+  out=${out%$'\n'*}
+  [ "$status" != 413 ] || die "file is over the 10 MB limit"
+  [[ $status == 2* ]] || die "HTTP $status: $(jq -r '.error // .' <<<"$out" 2>/dev/null || echo "$out")"
+  printf '%s\n' "$out"
+}
+
+purge() {
+  if [ -z "${GH_IMG_CF_ZONE:-}" ] || [ ! -e "$cf_token_file" ]; then
+    echo "gh-img: no Cloudflare zone or token, so cached copies expire within a day" >&2
+    return
+  fi
+  private_file "$cf_token_file"
+
+  local ok
+  ok=$(curl -sS --max-time 30 -X POST "https://api.cloudflare.com/client/v4/zones/$GH_IMG_CF_ZONE/purge_cache" \
+    -H @<(printf 'Authorization: Bearer %s\n' "$(<"$cf_token_file")") \
+    -H 'Content-Type: application/json' \
+    --data "$(jq -cn --arg u "$1" '{files: [$u]}')" | jq -r '.success') || ok=false
+  [ "$ok" = true ] || echo "gh-img: Cloudflare purge failed for $1" >&2
+}
+
+private_file "$token_file"
+
+if [ "${1:-}" = rm ]; then
+  shift
+  [ $# -gt 0 ] || die "usage: gh-img rm URL..."
+  for u in "$@"; do
+    request -X DELETE "$endpoint/${u##*/}" | jq -r '"deleted \(.deleted)"'
+    purge "$u"
+  done
+  exit 0
+fi
+
+alt=screenshot field=markdown expiry=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --alt) alt="$2"; shift 2 ;;
+    --url) field=url; shift ;;
+    --ttl) expiry="&ttl=$(jq -rn --arg t "$2" '$t|@uri')"; shift 2 ;;
+    --keep) expiry="&keep=1"; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown option $1" ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || die "usage: gh-img [--alt TEXT] [--ttl 30d | --keep] [--url] FILE..."
+
+for f in "$@"; do
+  [ -f "$f" ] || die "not a file: $f"
+  request -X POST --data-binary "@$f" -H 'Content-Type: application/octet-stream' \
+    "$endpoint/upload?alt=$(jq -rn --arg a "$alt" '$a|@uri')$expiry" | jq -r ".$field"
+done

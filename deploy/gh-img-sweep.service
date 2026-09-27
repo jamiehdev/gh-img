@@ -1,0 +1,40 @@
+[Unit]
+Description=gh-img: delete expired images
+
+[Service]
+Type=oneshot
+User=gh-img
+Group=gh-img
+Environment=IMG_DIR=/srv/gh-img
+Environment=INDEX_PATH=/var/lib/gh-img/index.json
+ExecStart=/usr/local/bin/gh-img-server sweep
+UMask=0027
+StateDirectory=gh-img
+StateDirectoryMode=0700
+ReadWritePaths=/srv/gh-img
+
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
