@@ -34,6 +34,9 @@ jobs:
       - run: shellcheck bin/gh-img scripts/*.sh deploy/install.sh
       - run: sudo apt-get update -q && sudo apt-get install -y -q libimage-exiftool-perl
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # no lockfile to key the cache on
+          enable-cache: false
       - run: scripts/check-fixtures.sh
 
   build:
